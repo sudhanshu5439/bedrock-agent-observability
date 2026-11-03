@@ -1,0 +1,6 @@
+-r requirements.txt
+pytest>=9.0
+ruff>=0.17
+# screenshots (docs/capture_images.py): uses the installed Chrome, no browser download needed
+playwright>=1.64
+pillow>=13.0

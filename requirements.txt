@@ -1,0 +1,4 @@
+boto3>=1.43
+pandas>=3.0
+streamlit>=1.66
+altair>=6.0

@@ -1,0 +1,13 @@
+# Keeps dependencies and GitHub Actions up to date with weekly, reviewable pull requests.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      actions: { patterns: ["*"] }
+  - package-ecosystem: pip
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      python: { patterns: ["*"] }

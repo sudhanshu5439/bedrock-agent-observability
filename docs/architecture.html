@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bedrock Agent Observability</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Layout idea: one wide architecture figure (same visual language as the Sentinel diagram),
+   then a technical write-up in a readable column. Single light theme, like the source diagram. */
+:root {
+  --ink: #1b2230;
+  --muted: #5b6474;
+  --line: #d5dae3;
+  --paper: #ffffff;
+  --wash: #f6f7f9;
+  --blue: #2459d6;
+  --green: #12825a;
+  --red: #c8193c;
+  --font-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-body); }
+body { padding: 40px clamp(16px, 4vw, 48px) 64px; line-height: 1.55; font-size: 15px; }
+header, main { max-width: 1240px; margin: 0 auto; }
+h1 { font-size: 34px; letter-spacing: -0.02em; margin: 0 0 8px; text-wrap: balance; }
+h2 { font-size: 22px; margin: 48px 0 12px; letter-spacing: -0.01em; text-wrap: balance; }
+h3 { font-size: 16px; margin: 24px 0 8px; }
+p, li { max-width: 78ch; }
+.lede { color: var(--muted); font-size: 16px; max-width: 95ch; margin: 0; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.chip { font-size: 12px; font-weight: 500; padding: 3px 10px; border-radius: 999px; background: var(--wash); border: 1px solid var(--line); color: var(--muted); }
+code { font-family: var(--font-mono); font-size: 0.86em; background: var(--wash); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+
+figure { margin: 28px 0 0; }
+.diagram { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; padding: 16px; background: var(--paper); }
+.diagram svg { display: block; width: 100%; min-width: 1100px; height: auto; font-family: var(--font-body); }
+figcaption { color: var(--muted); font-size: 13px; margin-top: 10px; }
+
+/* SVG classes (styled from the page; the SVG itself carries no <style>) */
+.card { fill: #fff; stroke: #d5dae3; }
+.box { fill: none; stroke-width: 1.5; }
+.panel { fill: #f8f9fb; stroke: #e1e5ec; }
+.ic { fill: #fff; font-size: 12px; font-weight: 700; }
+.ic.sm { font-size: 10px; }
+.ct { fill: var(--ink); font-size: 13px; font-weight: 600; }
+.cs { fill: var(--muted); font-size: 11px; }
+.bh { fill: var(--ink); font-size: 13px; font-weight: 600; }
+.zl { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; }
+.al { fill: var(--ink); font-size: 11px; }
+.lg { fill: var(--ink); font-size: 12px; }
+.nt { fill: var(--muted); font-size: 12px; }
+.nm { fill: #fff; font-size: 10px; font-weight: 700; }
+.ph { fill: var(--ink); font-size: 15px; font-weight: 700; }
+.pb { fill: var(--ink); font-size: 12px; font-weight: 600; }
+.pt { fill: #3b4456; font-size: 12px; }
+
+.flows { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 20px; margin-top: 20px; }
+.flow { border: 1px solid var(--line); border-radius: 12px; padding: 18px 22px; background: #fafbfc; }
+.flow.read { background: #fdf4f6; border-color: #f2d3da; }
+.flow h3 { margin-top: 0; }
+.flow ol { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.flow li { display: grid; grid-template-columns: 26px 1fr; gap: 8px; font-size: 14px; max-width: none; }
+.dot { width: 20px; height: 20px; border-radius: 50%; background: var(--ink); color: #fff; font-size: 11px; font-weight: 700; display: grid; place-items: center; margin-top: 2px; }
+.read .dot { background: var(--red); }
+
+.tbl { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 600; background: var(--wash); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.total td { font-weight: 700; border-top: 2px solid var(--ink); }
+.yes { color: var(--green); font-weight: 600; }
+.no { color: var(--red); font-weight: 600; }
+.part { color: #a15c00; font-weight: 600; }
+tr.pick td { background: #f1f5fe; }
+
+.pill { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.pill.done { background: #e3f5ec; color: var(--green); }
+.pill.next { background: #e7eefc; color: var(--blue); }
+.pill.later { background: var(--wash); color: var(--muted); border: 1px solid var(--line); }
+
+.callout { border-left: 3px solid var(--blue); background: #f1f5fe; padding: 12px 16px; border-radius: 0 8px 8px 0; max-width: 90ch; }
+.callout.warn { border-color: #a15c00; background: #fff6e8; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; }
+footer { max-width: 1240px; margin: 48px auto 0; color: var(--muted); font-size: 12px; border-top: 1px solid var(--line); padding-top: 16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Bedrock Agent Observability · demo architecture</h1>
+  <p class="lede">Read it top to bottom: a request leaves the laptop, reaches one of two agents (classic Bedrock Agent or AgentCore), and every step it takes is recorded inside the AWS account. The dashboard at the bottom reads those records back, so for any agent we can answer what it is, what it did, who asked, what it cost and where it failed.</p>
+  <div class="meta">
+    <span class="chip">Account: shared company AWS account</span>
+    <span class="chip">Region: us-east-1</span>
+    <span class="chip">Model: Claude Haiku 4.5</span>
+    <span class="chip">Status: All phases done · 3 Nov 2026</span>
+  </div>
+</header>
+
+<main>
+<figure>
+  <div class="diagram"><svg viewBox="0 0 1600 1090" role="img" aria-label="Requests flow from the laptop to a classic Bedrock Agent and an AgentCore agent that share Claude Haiku 4.5; every call is recorded by CloudTrail, model invocation logging, CloudWatch metrics, DynamoDB traces and AgentCore spans, and the Streamlit dashboard reads all of them back."><defs><marker id="a-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1b2230"/></marker><marker id="a-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#12825a"/></marker><marker id="a-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c8193c"/></marker></defs><path d="M960,22 H1000" fill="none" stroke="#1b2230" stroke-width="1.6" marker-end="url(#a-ink)"/><text x="1008" y="26" text-anchor="start" class="lg">Request · 1–9</text><path d="M1165,22 H1205" fill="none" stroke="#12825a" stroke-width="1.6" stroke-dasharray="2 4" marker-end="url(#a-green)"/><text x="1213" y="26" text-anchor="start" class="lg">Telemetry</text><path d="M1370,22 H1410" fill="none" stroke="#c8193c" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#a-red)"/><text x="1418" y="26" text-anchor="start" class="lg">Dashboard reads · A–F</text><rect x="20" y="48" width="1560" height="136" class="box" stroke="#1b2230"/><rect x="20" y="48" width="30" height="30" fill="#1b2230"/><text x="35" y="68" text-anchor="middle" class="ic sm">&gt;_</text><text x="62" y="68" class="bh">Your laptop · Python 3.12 + boto3 · AWS SSO profile genai-demo</text><g><rect x="50" y="96" width="230" height="64" rx="8" class="card"/><rect x="62" y="110" width="36" height="36" rx="8" fill="#3b4456"/><text x="80" y="133" text-anchor="middle" class="ic">P</text><text x="108" y="125" class="ct">Presenter</text><text x="108" y="143" class="cs">asks the agent a question</text></g><g><rect x="345" y="96" width="230" height="64" rx="8" class="card"/><rect x="357" y="110" width="36" height="36" rx="8" fill="#c8193c"/><text x="375" y="133" text-anchor="middle" class="ic">LT</text><text x="403" y="125" class="ct">Live test tab</text><text x="403" y="143" class="cs">inside the Streamlit dashboard</text></g><g><rect x="640" y="96" width="230" height="64" rx="8" class="card"/><rect x="652" y="110" width="36" height="36" rx="8" fill="#3b4456"/><text x="670" y="133" text-anchor="middle" class="ic">W</text><text x="698" y="125" class="ct">Invoke wrapper</text><text x="698" y="143" class="cs">boto3 · enableTrace=true</text></g><g><rect x="935" y="96" width="230" height="64" rx="8" class="card"/><rect x="947" y="110" width="36" height="36" rx="8" fill="#3b4456"/><text x="965" y="133" text-anchor="middle" class="ic">TG</text><text x="993" y="125" class="ct">Traffic generator</text><text x="993" y="143" class="cs">50 scripted demo prompts</text></g><path d="M280,128 H343" fill="none" stroke="#1b2230" stroke-width="1.6" marker-end="url(#a-ink)"/><circle cx="312" cy="128" r="10" fill="#1b2230"/><text x="312" y="132" text-anchor="middle" class="nm">1</text><path d="M575,128 H638" fill="none" stroke="#1b2230" stroke-width="1.6" marker-end="url(#a-ink)"/><text x="607" y="150" text-anchor="middle" class="al">calls</text><path d="M935,128 H872" fill="none" stroke="#1b2230" stroke-width="1.6" marker-end="url(#a-ink)"/><text x="906" y="150" text-anchor="middle" class="al">batch</text><text x="1230" y="104" text-anchor="start" class="nt">Credentials come from IAM Identity</text><text x="1230" y="120" text-anchor="start" class="nt">Center (SSO). No long-lived keys</text><text x="1230" y="136" text-anchor="start" class="nt">are stored on the laptop.</text><rect x="20" y="220" width="1180" height="640" class="box" stroke="#2459d6"/><rect x="20" y="220" width="30" height="30" fill="#2459d6"/><text x="35" y="240" text-anchor="middle" class="ic sm">aws</text><text x="62" y="240" class="bh">AWS account · shared company account · us-east-1</text><rect x="45" y="262" width="1130" height="290" rx="8" fill="#f1f5fe" stroke="#c3d2f5" stroke-dasharray="4 3"/><text x="62" y="284" class="zl" fill="#2459d6">AGENTS · two hosting styles, one model</text><g><rect x="70" y="322" width="230" height="64" rx="8" class="card"/><rect x="82" y="336" width="36" height="36" rx="8" fill="#2459d6"/><text x="100" y="359" text-anchor="middle" class="ic">HR</text><text x="128" y="351" class="ct">HR Assistant</text><text x="128" y="369" class="cs">classic Bedrock Agent</text></g><g><rect x="345" y="322" width="230" height="64" rx="8" class="card"/><rect x="357" y="336" width="36" height="36" rx="8" fill="#2459d6"/><text x="375" y="359" text-anchor="middle" class="ic">G</text><text x="403" y="351" class="ct">Guardrail</text><text x="403" y="369" class="cs">PII mask · denied topic</text></g><g><rect x="620" y="322" width="230" height="64" rx="8" class="card"/><rect x="632" y="336" width="36" height="36" rx="8" fill="#d4560f"/><text x="650" y="359" text-anchor="middle" class="ic">AI</text><text x="678" y="351" class="ct">Claude Haiku 4.5</text><text x="678" y="369" class="cs">us. inference profile</text></g><g><rect x="895" y="322" width="230" height="64" rx="8" class="card"/><rect x="907" y="336" width="36" height="36" rx="8" fill="#2459d6"/><text x="925" y="359" text-anchor="middle" class="ic">IT</text><text x="953" y="351" class="ct">IT Support</text><text x="953" y="369" class="cs">AgentCore Harness</text></g><g><rect x="70" y="450" width="230" height="64" rx="8" class="card"/><rect x="82" y="464" width="36" height="36" rx="8" fill="#2459d6"/><text x="100" y="487" text-anchor="middle" class="ic">λ</text><text x="128" y="479" class="ct">hr-tools Lambda</text><text x="128" y="497" class="cs">leave balance · HR policy</text></g><g><rect x="895" y="450" width="230" height="64" rx="8" class="card"/><rect x="907" y="464" width="36" height="36" rx="8" fill="#2459d6"/><text x="925" y="487" text-anchor="middle" class="ic">GW</text><text x="953" y="479" class="ct">Gateway → it-tools λ</text><text x="953" y="497" class="cs">MCP: ticket · reset steps</text></g><text x="345" y="474" text-anchor="start" class="nt">Same model, two loops: Bedrock</text><text x="345" y="490" text-anchor="start" class="nt">Agents (classic) and a managed</text><text x="345" y="506" text-anchor="start" class="nt">Strands loop in an AgentCore microVM.</text><path d="M700,160 V302 H185 V320" fill="none" stroke="#1b2230" stroke-width="1.6" marker-end="url(#a-ink)"/><circle cx="430" cy="302" r="10" fill="#1b2230"/><text x="430" y="306" text-anchor="middle" class="nm">2</text><text x="446" y="296" text-anchor="start" class="al">InvokeAgent · trace on</text><path d="M820,160 V302 H1010 V320" fill="none" stroke="#1b2230" stroke-width="1.6" marker-end="url(#a-ink)"/><circle cx="880" cy="302" r="10" fill="#1b2230"/><text x="880" y="306" text-anchor="middle" class="nm">2</text><text x="896" y="296" text-anchor="start" class="al">InvokeHarness</text><path d="M300,354 H343" fill="none" stroke="#1b2230" stroke-width="1.6" marker-end="url(#a-ink)"/><circle cx="322" cy="354" r="10" fill="#1b2230"/><text x="322" y="358" text-anchor="middle" class="nm">3</text><path d="M575,354 H618" fill="none" stroke="#1b2230" stroke-width="1.6" marker-end="url(#a-ink)"/><circle cx="597" cy="354" r="10" fill="#1b2230"/><text x="597" y="358" text-anchor="middle" class="nm">4</text><path d="M895,354 H852" fill="none" stroke="#1b2230" stroke-width="1.6" marker-end="url(#a-ink)"/><circle cx="872" cy="354" r="10" fill="#1b2230"/><text x="872" y="358" text-anchor="middle" class="nm">4</text><path d="M185,386 V448" fill="none" stroke="#1b2230" stroke-width="1.6" marker-end="url(#a-ink)"/><circle cx="185" cy="418" r="10" fill="#1b2230"/><text x="185" y="422" text-anchor="middle" class="nm">5</text><path d="M1010,386 V448" fill="none" stroke="#1b2230" stroke-width="1.6" marker-end="url(#a-ink)"/><circle cx="1010" cy="418" r="10" fill="#1b2230"/><text x="1010" y="422" text-anchor="middle" class="nm">5</text><rect x="45" y="585" width="1130" height="255" rx="8" fill="#eefaf3" stroke="#b9e3cc" stroke-dasharray="4 3"/><text x="62" y="607" class="zl" fill="#12825a">TELEMETRY AND AUDIT · everything stays in the account</text><g><rect x="70" y="630" width="230" height="64" rx="8" class="card"/><rect x="82" y="644" width="36" height="36" rx="8" fill="#12825a"/><text x="100" y="667" text-anchor="middle" class="ic">M</text><text x="128" y="659" class="ct">CloudWatch metrics</text><text x="128" y="677" class="cs">invocations · latency · tokens</text></g><g><rect x="345" y="630" width="230" height="64" rx="8" class="card"/><rect x="357" y="644" width="36" height="36" rx="8" fill="#12825a"/><text x="375" y="667" text-anchor="middle" class="ic">CT</text><text x="403" y="659" class="ct">CloudTrail · demo trail</text><text x="403" y="677" class="cs">data events: who called</text></g><g><rect x="620" y="630" width="230" height="64" rx="8" class="card"/><rect x="632" y="644" width="36" height="36" rx="8" fill="#12825a"/><text x="650" y="667" text-anchor="middle" class="ic">IL</text><text x="678" y="659" class="ct">Model invocation logs</text><text x="678" y="677" class="cs">prompt · response · tokens</text></g><g><rect x="895" y="630" width="230" height="64" rx="8" class="card"/><rect x="907" y="644" width="36" height="36" rx="8" fill="#12825a"/><text x="925" y="667" text-anchor="middle" class="ic">TS</text><text x="953" y="659" class="ct">Transaction Search</text><text x="953" y="677" class="cs">OTel spans in aws/spans</text></g><g><rect x="70" y="750" width="230" height="64" rx="8" class="card"/><rect x="82" y="764" width="36" height="36" rx="8" fill="#12825a"/><text x="100" y="787" text-anchor="middle" class="ic">DB</text><text x="128" y="779" class="ct">DynamoDB traces</text><text x="128" y="797" class="cs">bedrock-demo-agent-traces</text></g><g><rect x="345" y="750" width="230" height="64" rx="8" class="card"/><rect x="357" y="764" width="36" height="36" rx="8" fill="#7b8494"/><text x="375" y="787" text-anchor="middle" class="ic">CT</text><text x="403" y="779" class="ct">Company trail</text><text x="403" y="797" class="cs">config changes · read-only</text></g><g><rect x="620" y="750" width="230" height="64" rx="8" class="card"/><rect x="632" y="764" width="36" height="36" rx="8" fill="#12825a"/><text x="650" y="787" text-anchor="middle" class="ic">S3</text><text x="678" y="779" class="ct">S3 log archive</text><text x="678" y="797" class="cs">30-day expiry</text></g><g><rect x="895" y="750" width="230" height="64" rx="8" class="card"/><rect x="907" y="764" width="36" height="36" rx="8" fill="#12825a"/><text x="925" y="787" text-anchor="middle" class="ic">GO</text><text x="953" y="779" class="ct">GenAI Observability</text><text x="953" y="797" class="cs">CloudWatch console view</text></g><path d="M460,552 V628" fill="none" stroke="#12825a" stroke-width="1.6" stroke-dasharray="2 4" marker-end="url(#a-green)"/><circle cx="460" cy="570" r="10" fill="#1b2230"/><text x="460" y="574" text-anchor="middle" class="nm">6</text><text x="476" y="574" text-anchor="start" class="al">who called</text><path d="M735,386 V628" fill="none" stroke="#12825a" stroke-width="1.6" stroke-dasharray="2 4" marker-end="url(#a-green)"/><circle cx="735" cy="570" r="10" fill="#1b2230"/><text x="735" y="574" text-anchor="middle" class="nm">7</text><text x="751" y="574" text-anchor="start" class="al">every model call</text><path d="M70,354 H56 V782 H68" fill="none" stroke="#12825a" stroke-width="1.6" stroke-dasharray="2 4" marker-end="url(#a-green)"/><circle cx="56" cy="570" r="10" fill="#1b2230"/><text x="56" y="574" text-anchor="middle" class="nm">8</text><path d="M1010,514 V628" fill="none" stroke="#12825a" stroke-width="1.6" stroke-dasharray="2 4" marker-end="url(#a-green)"/><circle cx="1010" cy="570" r="10" fill="#1b2230"/><text x="1010" y="574" text-anchor="middle" class="nm">8</text><text x="1026" y="574" text-anchor="start" class="al">spans</text><path d="M185,514 V628" fill="none" stroke="#12825a" stroke-width="1.6" stroke-dasharray="2 4" marker-end="url(#a-green)"/><circle cx="185" cy="570" r="10" fill="#1b2230"/><text x="185" y="574" text-anchor="middle" class="nm">9</text><text x="201" y="574" text-anchor="start" class="al">metrics</text><path d="M735,694 V748" fill="none" stroke="#12825a" stroke-width="1.6" stroke-dasharray="2 4" marker-end="url(#a-green)"/><text x="745" y="726" text-anchor="start" class="al">copy</text><path d="M1010,694 V748" fill="none" stroke="#12825a" stroke-width="1.6" stroke-dasharray="2 4" marker-end="url(#a-green)"/><text x="1020" y="726" text-anchor="start" class="al">rendered in</text><rect x="20" y="890" width="1180" height="180" class="box" stroke="#c8193c"/><rect x="20" y="890" width="30" height="30" fill="#c8193c"/><text x="35" y="910" text-anchor="middle" class="ic sm">D</text><text x="62" y="910" class="bh">Dashboard · Streamlit on your laptop · reads through boto3</text><g><rect x="70" y="980" width="230" height="64" rx="8" class="card"/><rect x="82" y="994" width="36" height="36" rx="8" fill="#c8193c"/><text x="100" y="1017" text-anchor="middle" class="ic">S</text><text x="128" y="1009" class="ct">Sessions · classic</text><text x="128" y="1027" class="cs">metrics + step timeline</text></g><g><rect x="345" y="980" width="230" height="64" rx="8" class="card"/><rect x="357" y="994" width="36" height="36" rx="8" fill="#c8193c"/><text x="375" y="1017" text-anchor="middle" class="ic">A</text><text x="403" y="1009" class="ct">Audit trail</text><text x="403" y="1027" class="cs">who did what, when</text></g><g><rect x="620" y="980" width="230" height="64" rx="8" class="card"/><rect x="632" y="994" width="36" height="36" rx="8" fill="#c8193c"/><text x="650" y="1017" text-anchor="middle" class="ic">P</text><text x="678" y="1009" class="ct">Prompts and guardrails</text><text x="678" y="1027" class="cs">model I/O · blocks · errors</text></g><g><rect x="895" y="980" width="230" height="64" rx="8" class="card"/><rect x="907" y="994" width="36" height="36" rx="8" fill="#c8193c"/><text x="925" y="1017" text-anchor="middle" class="ic">S</text><text x="953" y="1009" class="ct">Sessions · AgentCore</text><text x="953" y="1027" class="cs">span timeline</text></g><path d="M185,978 V816" fill="none" stroke="#c8193c" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#a-red)"/><rect x="175.0" y="940" width="20" height="20" rx="10" fill="#c8193c"/><text x="185" y="954" text-anchor="middle" class="nm">C</text><path d="M280,978 V870 H322 V662 H302" fill="none" stroke="#c8193c" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#a-red)"/><rect x="312.0" y="710" width="20" height="20" rx="10" fill="#c8193c"/><text x="322" y="724" text-anchor="middle" class="nm">B</text><path d="M460,978 V816" fill="none" stroke="#c8193c" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#a-red)"/><rect x="450.0" y="940" width="20" height="20" rx="10" fill="#c8193c"/><text x="460" y="954" text-anchor="middle" class="nm">E</text><path d="M560,978 V870 H597 V662 H577" fill="none" stroke="#c8193c" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#a-red)"/><rect x="587.0" y="710" width="20" height="20" rx="10" fill="#c8193c"/><text x="597" y="724" text-anchor="middle" class="nm">E</text><path d="M830,978 V870 H872 V662 H852" fill="none" stroke="#c8193c" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#a-red)"/><rect x="854.0" y="710" width="36" height="20" rx="10" fill="#c8193c"/><text x="872" y="724" text-anchor="middle" class="nm">D F</text><path d="M1100,978 V870 H1150 V662 H1127" fill="none" stroke="#c8193c" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#a-red)"/><rect x="1140.0" y="710" width="20" height="20" rx="10" fill="#c8193c"/><text x="1150" y="724" text-anchor="middle" class="nm">C</text><path d="M1185,890 V354 H1127" fill="none" stroke="#c8193c" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#a-red)"/><rect x="1175.0" y="710" width="20" height="20" rx="10" fill="#c8193c"/><text x="1185" y="724" text-anchor="middle" class="nm">A</text><text x="1177" y="578" text-anchor="end" class="al">agent config</text><rect x="1230" y="220" width="350" height="330" rx="10" class="panel"/><text x="1250" y="250" text-anchor="start" class="ph">Design principles</text><text x="1250" y="276" text-anchor="start" class="pb">AWS-native.</text><text x="1250" y="293" text-anchor="start" class="pt">Data never leaves the account; no new vendor.</text><text x="1250" y="310" text-anchor="start" class="pb">Read-only by default.</text><text x="1250" y="327" text-anchor="start" class="pt">Only the Live test tab invokes an agent.</text><text x="1250" y="344" text-anchor="start" class="pb">Every number names its source.</text><text x="1250" y="361" text-anchor="start" class="pt">Each tile maps to one AWS API or log.</text><text x="1250" y="378" text-anchor="start" class="pb">Leave shared things alone.</text><text x="1250" y="395" text-anchor="start" class="pt">Region-wide settings are only set where unused.</text><text x="1250" y="412" text-anchor="start" class="pb">Easy to remove.</text><text x="1250" y="429" text-anchor="start" class="pt">bedrock-demo-* names, one teardown script.</text><text x="1250" y="446" text-anchor="start" class="pb">Cheap on purpose.</text><text x="1250" y="463" text-anchor="start" class="pt">Haiku 4.5, on-demand billing, 30-day expiry.</text><rect x="1230" y="575" width="350" height="245" rx="10" class="panel"/><text x="1250" y="605" text-anchor="start" class="ph">Cost · demo week (≈500 agent runs)</text><text x="1250" y="631" text-anchor="start" class="pt">Claude Haiku 4.5 model calls</text><text x="1560" y="631" text-anchor="end" class="pt">≈ $5.50</text><text x="1250" y="648" text-anchor="start" class="pt">Guardrail checks</text><text x="1560" y="648" text-anchor="end" class="pt">≈ $0.25</text><text x="1250" y="665" text-anchor="start" class="pt">AgentCore Harness + Gateway</text><text x="1560" y="665" text-anchor="end" class="pt">&lt; $0.50</text><text x="1250" y="682" text-anchor="start" class="pt">Logs, trail, DynamoDB, S3</text><text x="1560" y="682" text-anchor="end" class="pt">&lt; $0.20</text><text x="1250" y="699" text-anchor="start" class="pt">Lambda, budget, Streamlit (local)</text><text x="1560" y="699" text-anchor="end" class="pt">$0</text><text x="1250" y="716" text-anchor="start" class="pb">Total</text><text x="1560" y="716" text-anchor="end" class="pb">≈ $6–8</text><text x="1250" y="733" text-anchor="start" class="pt">Model tokens are ~90% of the bill.</text><text x="1250" y="750" text-anchor="start" class="pt">Budget alarm: $25/month, email alerts.</text><rect x="1230" y="845" width="350" height="225" rx="10" class="panel"/><text x="1250" y="875" text-anchor="start" class="ph">Shared account · left untouched</text><text x="1250" y="901" text-anchor="start" class="pt">Another project&#x27;s invocation logging (other region)</text><text x="1250" y="918" text-anchor="start" class="pt">Company organisation trail (read-only use)</text><text x="1250" y="935" text-anchor="start" class="pt">Other teams&#x27; Bedrock agents</text><text x="1250" y="952" text-anchor="start" class="pt">Other teams&#x27; AgentCore runtimes</text><text x="1250" y="969" text-anchor="start" class="pt">Our resources: bedrock-demo-* names,</text><text x="1250" y="986" text-anchor="start" class="pt">tag Project=bedrock-observability-demo</text><text x="1250" y="1003" text-anchor="start" class="pt">(IAM roles untagged: no iam:TagRole).</text></svg></div>
+  <figcaption>Black arrows are the request path (1–9), green dotted arrows are the records AWS writes as a side effect, red dashed arrows are what the dashboard reads (A–F). Nothing leaves the AWS account except the dashboard's read calls from the laptop.</figcaption>
+</figure>
+
+<section class="flows" aria-label="Flows">
+  <div class="flow">
+    <h3>Flow 1 · A request, and the evidence it leaves</h3>
+    <ol>
+      <li><span class="dot">1</span><span>The presenter types a question in the dashboard's Live test tab, or the traffic generator sends a batch of scripted prompts.</span></li>
+      <li><span class="dot">2</span><span>The invoke wrapper calls <code>InvokeAgent</code> with <code>enableTrace=true</code> (classic) or <code>InvokeHarness</code> (AgentCore; CloudTrail records it as <code>InvokeAgentRuntime</code>).</span></li>
+      <li><span class="dot">3</span><span>The guardrail screens the input and, later, the answer: it masks emails and phone numbers and refuses the denied topic.</span></li>
+      <li><span class="dot">4</span><span>The agent asks Claude Haiku 4.5 what to do next.</span></li>
+      <li><span class="dot">5</span><span>The agent calls a tool (the <code>hr-tools</code> Lambda for HR; for IT, an MCP call through AgentCore Gateway to the <code>it-tools</code> Lambda) and loops through 4–5 until it can answer.</span></li>
+      <li><span class="dot">6</span><span>CloudTrail records the invoke call as a data event: who called, when, from which IP, against which agent.</span></li>
+      <li><span class="dot">7</span><span>Model invocation logging writes every model call's prompt, response and token counts to CloudWatch Logs, with a copy in S3.</span></li>
+      <li><span class="dot">8</span><span>The step-by-step record is kept: classic trace events come back to the wrapper, which saves them to DynamoDB; AgentCore emits OpenTelemetry spans that Transaction Search stores in <code>aws/spans</code>.</span></li>
+      <li><span class="dot">9</span><span>CloudWatch publishes invocations, latency, tokens, errors and throttles as metrics.</span></li>
+    </ol>
+  </div>
+  <div class="flow read">
+    <h3>Flow 2 · Investigating an agent in the dashboard</h3>
+    <ol>
+      <li><span class="dot">A</span><span>Pick an agent. Its configuration (instructions, model, tools, guardrail, versions) is read live from the Bedrock Agent and AgentCore control APIs.</span></li>
+      <li><span class="dot">B</span><span>Health over time: invocations, latency, tokens and errors from CloudWatch metrics.</span></li>
+      <li><span class="dot">C</span><span>Open a session: a step timeline built from DynamoDB (classic) or from spans (AgentCore): question, reasoning, tool call with inputs and outputs, answer.</span></li>
+      <li><span class="dot">D</span><span>See exactly what the model was sent and what it replied, with tokens and estimated cost, from the invocation logs.</span></li>
+      <li><span class="dot">E</span><span>Audit: who invoked the agent (demo trail) and who changed it (company trail), with time and source IP.</span></li>
+      <li><span class="dot">F</span><span>Every guardrail block, masked field and failed call in one list, with the reason.</span></li>
+    </ol>
+  </div>
+</section>
+
+<h2>1. What we are building</h2>
+<p>Our team runs agents on Amazon Bedrock in two styles: classic <strong>Bedrock Agents</strong> (configured in the console, with action groups and knowledge bases) and <strong>Bedrock AgentCore</strong> agents (our own code, hosted by AWS). Today there is no single place to see what an agent did, who used it, what it cost, or why it failed.</p>
+<p>The demo builds one of each kind of agent from scratch, turns on every recording feature Bedrock offers, and puts a single dashboard on top. It is built to answer five questions for any agent:</p>
+<div class="callout"><strong>Why both types matter right now:</strong> AWS has put classic Bedrock Agents into maintenance mode (closed to new customers) and recommends moving to AgentCore, whose Harness is the managed replacement for the classic agent loop. Existing accounts like ours can still run and create classic agents, so for the length of any migration we will operate both side by side. An observability layer that covers both, and that does not change when an agent moves from one to the other, is exactly what that period needs.</div>
+<ol>
+  <li><strong>What is it?</strong> Model, instructions, tools, guardrail, versions.</li>
+  <li><strong>What did it do?</strong> Every step of every session: reasoning, tool calls, data returned, final answer.</li>
+  <li><strong>Who used or changed it?</strong> Caller identity, time, source IP, configuration changes.</li>
+  <li><strong>How is it performing, and what does it cost?</strong> Calls, latency, tokens, errors, estimated spend.</li>
+  <li><strong>What went wrong?</strong> Guardrail blocks, tool failures, throttles, model errors.</li>
+</ol>
+
+<h2>2. Components</h2>
+<div class="tbl"><table>
+  <thead><tr><th>Component</th><th>AWS service</th><th>What it gives us</th><th>Phase</th></tr></thead>
+  <tbody>
+    <tr><td>HR Assistant</td><td>Bedrock Agents (classic)</td><td><code>bedrock_demo_hr_assistant</code>, alias <code>live</code>. Action group <code>hr_tools</code> (Lambda: leave balance, HR policy) and the guardrail below.</td><td><span class="pill done">2 · done</span></td></tr>
+    <tr><td>IT Support</td><td>AgentCore Harness</td><td><code>bedrock_demo_it_support</code>: managed Strands agent loop, no container to build. Tracing built in.</td><td><span class="pill done">2 · done</span></td></tr>
+    <tr><td>IT tools</td><td>AgentCore Gateway</td><td><code>bedrock-demo-it-gateway</code> exposes the <code>it-tools</code> Lambda as MCP tools (ticket lookup, password-reset steps), with IAM auth.</td><td><span class="pill done">2 · done</span></td></tr>
+    <tr><td>Guardrail</td><td>Bedrock Guardrails</td><td><code>bedrock-demo-hr-guardrail</code> v1: masks emails and phone numbers, blocks card numbers, refuses colleague pay questions, content and prompt-attack filters.</td><td><span class="pill done">2 · done</span></td></tr>
+    <tr><td>Model</td><td>Claude Haiku 4.5</td><td>Cheapest capable Claude model in the account, via the <code>us.</code> cross-region inference profile.</td><td><span class="pill done">ready</span></td></tr>
+    <tr><td>Model invocation logs</td><td>CloudWatch Logs + S3</td><td>Full prompt, response, token counts and caller for every model call in us-east-1. <code>/bedrock-demo/model-invocations</code></td><td><span class="pill done">1 · done</span></td></tr>
+    <tr><td>Demo trail</td><td>CloudTrail (data events)</td><td>Each call to a classic agent, AgentCore runtime or guardrail: who, when, from where. <code>bedrock-demo-trail</code></td><td><span class="pill done">1 · done</span></td></tr>
+    <tr><td>Company trail</td><td>CloudTrail (management)</td><td>The company's existing organisation trail, used read-only for configuration changes (create, update, delete).</td><td><span class="pill done">exists</span></td></tr>
+    <tr><td>Trace store</td><td>DynamoDB</td><td>Step-by-step trace events for classic agents, which AWS does not store by itself. <code>bedrock-demo-agent-traces</code>, 30-day TTL.</td><td><span class="pill done">1 · done</span></td></tr>
+    <tr><td>Agent spans</td><td>X-Ray Transaction Search</td><td>OpenTelemetry spans for AgentCore sessions in <code>aws/spans</code>; also shown in CloudWatch GenAI Observability. Already active.</td><td><span class="pill done">exists</span></td></tr>
+    <tr><td>Metrics</td><td>CloudWatch metrics</td><td>Invocations, latency, input and output tokens, errors, throttles for models, agents, Lambda and AgentCore.</td><td><span class="pill done">automatic</span></td></tr>
+    <tr><td>Traffic generator</td><td>Python script</td><td>About 50 varied prompts: normal questions, tool calls, guardrail-blocked requests, deliberate errors.</td><td><span class="pill done">3 · done</span></td></tr>
+    <tr><td>Dashboard</td><td>Streamlit (local)</td><td>Seven tabs: Overview, Configuration, Metrics, Sessions and traces, Audit trail, Guardrails and errors, Live test.</td><td><span class="pill done">4 · done</span></td></tr>
+    <tr><td>Budget + teardown</td><td>AWS Budgets, Python</td><td>$25/month alarm with email alerts; one script deletes every <code>bedrock-demo-*</code> resource.</td><td><span class="pill done">done</span></td></tr>
+  </tbody>
+</table></div>
+
+<h3>Why classic agents need the DynamoDB trace store</h3>
+<p>A classic Bedrock Agent only returns its step-by-step trace inside the response to <code>InvokeAgent</code>, and only when the caller asks for it with <code>enableTrace=true</code>. AWS does not keep that trace anywhere. The invoke wrapper reads the trace as it streams back and writes each event to DynamoDB, which is what lets the dashboard replay a session later. AgentCore does not need this: its spans are recorded by AWS automatically.</p>
+
+<h2>3. What the dashboard shows</h2>
+<div class="tbl"><table>
+  <thead><tr><th>Tab</th><th>Shows</th><th>Reads from</th></tr></thead>
+  <tbody>
+    <tr><td>Overview</td><td>All agents (both types) with status, calls, errors, latency, tokens, estimated cost.</td><td>Agent APIs, CloudWatch metrics</td></tr>
+    <tr><td>Configuration</td><td>Instructions, model, action groups and Lambda, guardrail settings, versions and aliases; AgentCore harness model, system prompt, limits, Gateway tools.</td><td><code>bedrock-agent</code>, <code>bedrock-agentcore-control</code></td></tr>
+    <tr><td>Metrics</td><td>Time-series charts of calls, latency, tokens, errors and throttles.</td><td>CloudWatch <code>GetMetricData</code></td></tr>
+    <tr><td>Sessions and traces</td><td>Session list; click one for the step timeline with timing and tokens per step.</td><td>DynamoDB (classic), Logs Insights on <code>aws/spans</code> (AgentCore)</td></tr>
+    <tr><td>Audit trail</td><td>Who invoked and who changed each agent, filterable by user and date.</td><td>Demo trail log group, company trail <code>LookupEvents</code></td></tr>
+    <tr><td>Guardrails and errors</td><td>Blocked and masked requests with the policy that fired; failed tool calls and model errors.</td><td>Invocation logs, trace store</td></tr>
+    <tr><td>Live test</td><td>Ask an agent a question and watch its trace build in real time.</td><td><code>InvokeAgent</code> / <code>InvokeAgentRuntime</code></td></tr>
+  </tbody>
+</table></div>
+
+<h2>4. Why this approach</h2>
+<p>The deciding facts: we run <strong>both</strong> agent types, the lead asked for depth (what the agent actually did, not only that it ran) plus an audit trail, and this is a demo that should not need a purchase or a security review.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Need</th><th>CloudWatch only</th><th>AgentCore Observability only</th><th>Third-party (Datadog, Langfuse, Arize)</th><th>This design</th></tr></thead>
+  <tbody>
+    <tr><td>Classic agents, step by step</td><td class="no">No · metrics and logs only</td><td class="no">No</td><td class="part">Needs our capture code anyway</td><td class="yes">Yes</td></tr>
+    <tr><td>AgentCore agents, step by step</td><td class="part">Partly</td><td class="yes">Yes</td><td class="yes">Yes</td><td class="yes">Yes</td></tr>
+    <tr><td>Agent configuration view</td><td class="no">No</td><td class="no">No</td><td class="no">No</td><td class="yes">Yes</td></tr>
+    <tr><td>Audit trail (who, when, where)</td><td class="part">Separate console</td><td class="no">No</td><td class="part">Usually not</td><td class="yes">Yes</td></tr>
+    <tr><td>One screen for everything</td><td class="no">No</td><td class="no">No</td><td class="yes">Yes</td><td class="yes">Yes</td></tr>
+    <tr><td>Data stays in our account</td><td class="yes">Yes</td><td class="yes">Yes</td><td class="no">No · review needed</td><td class="yes">Yes</td></tr>
+    <tr><td>Licence or procurement</td><td>None</td><td>None</td><td class="no">Required</td><td>None</td></tr>
+    <tr><td>Time to demo</td><td>½ day</td><td>1 day</td><td>2–5 days + approvals</td><td>3–4 days</td></tr>
+  </tbody>
+</table></div>
+
+<div class="grid2">
+  <div>
+    <h3>Reasons it wins</h3>
+    <ol>
+      <li><strong>Only option that covers both agent types.</strong> Every alternative leaves a gap in classic agents, configuration or audit.</li>
+      <li><strong>The groundwork is reusable.</strong> CloudTrail data events and invocation logging are the foundation for any tool we pick later, including a paid one. Only the thin dashboard would change.</li>
+      <li><strong>No procurement, no security review.</strong> Data stays in our account under our IAM.</li>
+      <li><strong>Cheap and reversible.</strong> About $6–8 for the demo week, a budget alarm, and one teardown script.</li>
+      <li><strong>Low risk.</strong> The dashboard only reads. It cannot change how any agent behaves.</li>
+    </ol>
+  </div>
+  <div>
+    <h3>Alternatives considered</h3>
+    <ul>
+      <li><strong>CloudWatch dashboards only.</strong> Easy, but cannot show agent configuration or a classic agent's reasoning and tool calls, which is the core of the ask.</li>
+      <li><strong>AgentCore Observability only.</strong> Excellent for AgentCore, blind to classic agents.</li>
+      <li><strong>Migrate classic agents to AgentCore first.</strong> A real project in its own right, far bigger than a demo.</li>
+      <li><strong>Datadog / Langfuse / Arize.</strong> Polished trace views, but licences, data leaving AWS, and we would still write capture code for classic agents. Worth evaluating for production.</li>
+      <li><strong>QuickSight or Grafana.</strong> Good charts (the account already uses QuickSight), but neither renders a step-by-step agent trace or agent configuration well.</li>
+      <li><strong>Full pipeline (Kinesis, OpenSearch).</strong> Built for scale we do not have yet; weeks of work and standing cost.</li>
+    </ul>
+  </div>
+</div>
+
+<h2>5. Cost</h2>
+<p>Estimates use AWS list prices for us-east-1 as known at the time of writing; confirm on the AWS pricing pages before quoting externally. The demo week assumes about 500 agent runs, each making about three model calls (≈6,000 input and ≈1,000 output tokens per run).</p>
+<div class="tbl"><table>
+  <thead><tr><th>Item</th><th>Unit price</th><th>Demo usage</th><th class="num">Demo week</th></tr></thead>
+  <tbody>
+    <tr><td>Claude Haiku 4.5</td><td>$1 per 1M input, $5 per 1M output tokens</td><td>3M in, 0.5M out</td><td class="num">≈ $5.50</td></tr>
+    <tr><td>Guardrail checks</td><td>≈ $0.15 per 1,000 text units</td><td>≈1,000 checks</td><td class="num">≈ $0.25</td></tr>
+    <tr><td>AgentCore Harness (runs on AgentCore Runtime)</td><td>≈ $0.0895 per vCPU-hour (active only), ≈ $0.00945 per GB-hour</td><td>≈250 sessions</td><td class="num">&lt; $0.50</td></tr>
+    <tr><td>AgentCore Gateway</td><td>≈ $0.005 per 1,000 tool calls</td><td>≈500 tool calls</td><td class="num">&lt; $0.01</td></tr>
+    <tr><td>CloudWatch Logs</td><td>$0.50 per GB ingested</td><td>≈30 MB</td><td class="num">&lt; $0.10</td></tr>
+    <tr><td>CloudTrail data events</td><td>$0.10 per 100,000 events</td><td>≈1,000 events</td><td class="num">&lt; $0.01</td></tr>
+    <tr><td>DynamoDB on-demand</td><td>pay per request</td><td>≈10,000 writes</td><td class="num">&lt; $0.05</td></tr>
+    <tr><td>S3</td><td>$0.023 per GB-month</td><td>&lt; 1 GB, 30-day expiry</td><td class="num">&lt; $0.01</td></tr>
+    <tr><td>Lambda</td><td>free tier</td><td>≈1,000 calls</td><td class="num">$0</td></tr>
+    <tr><td>AWS Budgets, Streamlit (on laptop)</td><td>free</td><td></td><td class="num">$0</td></tr>
+    <tr class="total"><td>Total</td><td></td><td></td><td class="num">≈ $6–8</td></tr>
+  </tbody>
+</table></div>
+<div class="callout">
+  <strong>At larger scale:</strong> for 10,000 agent runs a month, model tokens would be roughly $110 while the observability layer (logs, trail, traces, metrics) stays around $1–2. Recording everything costs about 1–2% of what the agents themselves cost. Not included: a knowledge base on OpenSearch Serverless (≈$175/month even when idle, so we skip it), and hosting the dashboard on EC2 (≈$15/month for a small instance) if it needs to run outside a laptop.
+</div>
+
+<h2>6. Build plan</h2>
+<div class="tbl"><table>
+  <thead><tr><th>Phase</th><th>Work</th><th>Status</th></tr></thead>
+  <tbody>
+    <tr><td>1 · Foundation</td><td>S3 bucket, log groups, IAM roles, model invocation logging, demo trail, DynamoDB trace table, budget alarm. Verified with a live model call that appeared in the log with caller identity and tokens.</td><td><span class="pill done">done</span></td></tr>
+    <tr><td>2 · Agents</td><td>HR Assistant (classic agent, Lambda action group, guardrail) and IT Support (AgentCore Harness with tools through AgentCore Gateway). Smoke tests passed, and the calls were confirmed in every source: CloudTrail (<code>InvokeAgent</code>, <code>ApplyGuardrail</code>, <code>InvokeAgentRuntime</code>), invocation logs (each agent under its own role) and AgentCore spans (model call, tool call, MCP call).</td><td><span class="pill done">done</span></td></tr>
+    <tr><td>3 · Traffic</td><td>Invoke wrapper and traffic generator: 45 conversations (53 calls) covering normal use, tool calls, multi-turn, guardrail blocks and failures. Every call is recorded in DynamoDB, the model invocation log, CloudTrail and (for AgentCore) <code>aws/spans</code>; ≈97k tokens.</td><td><span class="pill done">done</span></td></tr>
+    <tr><td>4 · Dashboard</td><td>Streamlit app with the seven tabs above, tested against live data in every tab and time range.</td><td><span class="pill done">done</span></td></tr>
+    <tr><td>5 · Handover</td><td>README with run instructions and a 10-minute demo script; teardown script (dry run by default, verified).</td><td><span class="pill done">done</span></td></tr>
+  </tbody>
+</table></div>
+
+<h2>7. Working safely in a shared account</h2>
+<p>The AWS account is shared with other teams and clients, so the build follows three rules:</p>
+<ul>
+  <li><strong>Do not touch what is not ours.</strong> Model invocation logging in ap-south-1 belongs to another project, the company trail is used read-only, and existing agents and runtimes are not modified.</li>
+  <li><strong>Region-wide settings only where unused.</strong> Invocation logging is one setting per region; we set it in us-east-1, where it was empty. The setup script refuses to overwrite anyone else's configuration.</li>
+  <li><strong>Everything is findable and removable.</strong> Every resource is named <code>bedrock-demo-*</code> and tagged <code>Project=bedrock-observability-demo</code> (IAM roles are named but not tagged, because the role lacks <code>iam:TagRole</code>).</li>
+</ul>
+<div class="callout warn">
+  <strong>Side effect to know about:</strong> invocation logging covers the whole us-east-1 region, so model calls from the two other teams' AgentCore runtimes there are also logged to our log group while the demo runs. Teardown switches it off.
+</div>
+
+<h2>8. Limits, and what production would add</h2>
+<ul>
+  <li>The dashboard is demo-grade: it runs on a laptop with the presenter's SSO credentials and has no login of its own.</li>
+  <li>Cost figures in the dashboard are estimates from token counts and list prices, not billing data.</li>
+  <li>Classic agent traces are only captured for calls that go through our wrapper. Agents called directly by other applications would need the same capture added there.</li>
+  <li>For production we would host the dashboard behind SSO (or move to AgentCore Observability or a paid tool once agents migrate), add alarms on error and guardrail rates, and set retention to match audit policy. The recording layer underneath stays as it is.</li>
+</ul>
+
+<h2>9. What the demo found</h2>
+<p>Running about 50 scripted conversations through both agents surfaced four issues that would have gone unnoticed without this view. Each is visible in the dashboard.</p>
+<table>
+  <thead><tr><th>Finding</th><th>Where it shows</th><th>Fix</th></tr></thead>
+  <tbody>
+    <tr><td>The guardrail blocks a valid question: “What’s the comp-off balance for E103?” matches the <em>colleague compensation</em> denied topic.</td><td>Guardrails &amp; errors</td><td>Reword the topic definition and add examples of allowed questions; publish a new guardrail version.</td></tr>
+    <tr><td>The output PII filter masks the HR team’s own contact address (<code>hr@acme.example</code>) in answers.</td><td>Guardrails &amp; errors</td><td>Allow-list company addresses (regex) or change EMAIL from ANONYMIZE for output.</td></tr>
+    <tr><td>The AgentCore harness exposes built-in <code>shell</code> and <code>file_operations</code> tools that nobody configured; only the system prompt keeps the agent from using them.</td><td>Configuration (warning)</td><td>Disable built-in tools in the harness configuration.</td></tr>
+    <tr><td>IT Support has no guardrail: it answers off-topic questions (jokes, trivia) and relies on its prompt to refuse unsafe ones.</td><td>Sessions &amp; traces</td><td>Attach a guardrail to the harness.</td></tr>
+  </tbody>
+</table>
+<p>Failures are also traceable end to end: one bad tool call (employee E999, ticket INC-500) appears in the Lambda log, the agent’s trace or span, and (classic agent) the error returned to the caller. The AgentCore agent recovered and apologised; the classic agent failed the request.</p>
+</main>
+
+<footer>Bedrock observability demo · shared AWS account · source in <code>bedrock-observability-demo/</code> · teardown removes every <code>bedrock-demo-*</code> resource.</footer>
+</body>
+</html>

@@ -1,0 +1,19 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Runtime output and ids of the deployed resources (created by infra/phase2_agents.py)
+*.log
+infra/outputs.json
+
+# Internal write-up for the team: unredacted screenshots and the Word document
+docs/img/
+docs/*.docx
+docs/build_word_doc.py
+
+# Local secrets
+.env
+.streamlit/secrets.toml

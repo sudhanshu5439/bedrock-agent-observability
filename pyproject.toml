@@ -1,0 +1,27 @@
+[project]
+name = "bedrock-agent-observability"
+version = "1.0.0"
+description = "Observability and audit dashboard for classic Amazon Bedrock Agents and AgentCore agents"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 125
+target-version = "py312"
+extend-exclude = [".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "S", "SIM"]
+ignore = [
+    "E501",  # long Logs Insights queries, prompts and UI strings read better unwrapped
+    "S101",  # assert in tests
+    "S603",  # subprocess: fixed argument list, no shell
+    "S608",  # Logs Insights query strings are built from our own resource ids, not user input
+    "E731",  # small lambdas assigned for readability
+    "SIM105",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
