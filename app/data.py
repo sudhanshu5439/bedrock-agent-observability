@@ -105,6 +105,11 @@ def caller_account():
     return SESSION.client("sts").get_caller_identity()["Account"]
 
 
+def _bin(minutes):
+    """Logs Insights bin() size: minutes above 59 must be written in hours (bin(6h), not bin(360m))."""
+    return f"{minutes // 60}h" if minutes >= 60 and minutes % 60 == 0 else f"{minutes}m"
+
+
 def since(hours):
     return datetime.now(UTC) - timedelta(hours=hours)
 
@@ -220,7 +225,7 @@ def model_calls(hours, bin_minutes):
     q = ("filter identity.arn like /bedrock-demo-/ "
          "| parse identity.arn 'assumed-role/*/*' as role, role_session "
          f"| stats count(*) as calls, sum(input.inputTokenCount) as tokens_in, "
-         f"sum(output.outputTokenCount) as tokens_out by bin({bin_minutes}m) as t, role")
+         f"sum(output.outputTokenCount) as tokens_out by bin({_bin(bin_minutes)}) as t, role")
     df = pd.DataFrame(insights(INVOCATION_LOG_GROUP, q, hours))
     if df.empty:
         return df
