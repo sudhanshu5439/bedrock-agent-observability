@@ -88,9 +88,9 @@ for i, (txt, kind) in enumerate([("Request · 1–9", "req"), ("Telemetry", "tel
     label(x + 48, 26, txt, cls="lg")
 
 # ---- laptop row
-box(20, 48, 1560, 136, INK, ">_", "Your laptop · Python 3.12 + boto3 · AWS SSO profile genai-demo")
+box(20, 48, 1560, 136, INK, ">_", "Presenter's laptop · Python 3.12 + boto3 · AWS SSO · traffic generator + local dashboard copy")
 card(50, 96, "Presenter", "asks the agent a question", "P", "#3b4456")
-card(C2, 96, "Live test tab", "inside the Streamlit dashboard", "LT", RED)
+card(C2, 96, "Live test tab", "inside the dashboard", "LT", RED)
 card(640, 96, "Invoke wrapper", "boto3 · enableTrace=true", "W", "#3b4456")
 card(935, 96, "Traffic generator", "50 scripted demo prompts", "TG", "#3b4456")
 path("M280,128 H343", "req"); num(312, 128, 1)
@@ -100,12 +100,12 @@ lines(1230, 104, [("Credentials come from IAM Identity", "nt"), ("Center (SSO). 
                   ("are stored on the laptop.", "nt")])
 
 # ---- AWS account
-box(20, 220, 1180, 640, BLUE, "aws", "AWS account · shared company account · us-east-1")
+box(20, 220, 1180, 640, BLUE, "aws", "AWS · us-east-1 (N. Virginia) · agents, model and every record")
 
 zone(45, 262, 1130, 290, "#f1f5fe", "#c3d2f5", "AGENTS · two hosting styles, one model", BLUE)
 card(C1, 322, "HR Assistant", "classic Bedrock Agent", "HR", BLUE)
 card(C2, 322, "Guardrail", "PII mask · denied topic", "G", BLUE)
-card(C3, 322, "Claude Haiku 4.5", "us. inference profile", "AI", ORANGE)
+card(C3, 322, "Haiku 4.5 model", "Anthropic · us. inference profile", "AI", ORANGE)
 card(C4, 322, "IT Support", "AgentCore Harness", "IT", BLUE)
 card(C1, 450, "hr-tools Lambda", "leave balance · HR policy", "λ", BLUE)
 card(C4, 450, "Gateway → it-tools λ", "MCP: ticket · reset steps", "GW", BLUE)
@@ -140,7 +140,7 @@ path("M735,694 V748", "tel"); label(745, 726, "copy")
 path("M1010,694 V748", "tel"); label(1020, 726, "rendered in")
 
 # ---- dashboard
-box(20, 890, 1180, 180, RED, "D", "Dashboard · Streamlit on your laptop · reads through boto3")
+box(20, 890, 1180, 180, RED, "D", "Dashboard · ECS Fargate in ap-south-1 (Mumbai) · password · read-only task role · reads us-east-1")
 card(C1, 980, "Sessions · classic", "metrics + step timeline", "S", RED)
 card(C2, 980, "Audit trail", "who did what, when", "A", RED)
 card(C3, 980, "Prompts and guardrails", "model I/O · blocks · errors", "P", RED)
@@ -153,6 +153,10 @@ path("M560,978 V870 H597 V662 H577", "read"); letter(597, 720, "E")
 path("M830,978 V870 H872 V662 H852", "read"); letter(872, 720, "D F")
 path("M1100,978 V870 H1150 V662 H1127", "read"); letter(1150, 720, "C")
 path("M1185,890 V354 H1127", "read"); letter(1185, 720, "A"); label(1177, 578, "agent config", "end")
+# The read arrows pass through the dashboard title: draw it again on top, with a white halo.
+svg.append('<text x="62" y="910" class="bh" style="paint-order:stroke;stroke:#fff;stroke-width:9px;'
+           'stroke-linejoin:round">Dashboard · ECS Fargate in ap-south-1 (Mumbai) · password · read-only task role · '
+           'reads us-east-1</text>')
 
 # ---- right panel
 def panel(y, h, title, rows):
@@ -170,12 +174,13 @@ panel(220, 330, "Design principles", [
     ("Cheap on purpose.", "pb"), ("Haiku 4.5, on-demand billing, 30-day expiry.", "pt"),
 ])
 panel(575, 245, "Cost · demo week (≈500 agent runs)", [
-    ("Claude Haiku 4.5 model calls", "pt", "≈ $5.50"),
+    ("Haiku 4.5 model calls", "pt", "≈ $5.50"),
     ("Guardrail checks", "pt", "≈ $0.25"),
     ("AgentCore Harness + Gateway", "pt", "< $0.50"),
     ("Logs, trail, DynamoDB, S3", "pt", "< $0.20"),
-    ("Lambda, budget, Streamlit (local)", "pt", "$0"),
-    ("Total", "pb", "≈ $6–8"),
+    ("Dashboard hosting (Fargate, Mumbai)", "pt", "≈ $4.20"),
+    ("Lambda, budget", "pt", "$0"),
+    ("Total", "pb", "≈ $10–12"),
     ("Model tokens are ~90% of the bill.", "pt"),
     ("Budget alarm: $25/month, email alerts.", "pt"),
 ])
@@ -197,7 +202,7 @@ DEFS = "".join(
 
 SVG = (
     '<svg viewBox="0 0 1600 1090" role="img" aria-label="Requests flow from the laptop to a classic Bedrock Agent and an '
-    'AgentCore agent that share Claude Haiku 4.5; every call is recorded by CloudTrail, model invocation logging, '
+    'AgentCore agent that share the Haiku 4.5 model in us-east-1; every call is recorded by CloudTrail, model invocation logging, '
     'CloudWatch metrics, DynamoDB traces and AgentCore spans, and the Streamlit dashboard reads all of them back.">'
     f'<defs>{DEFS}</defs>' + "".join(svg) + "</svg>"
 )
