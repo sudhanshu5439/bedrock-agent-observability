@@ -108,7 +108,7 @@ st.caption(f"Account {ACCOUNT} · us-east-1 · demo agents only (bedrock-demo-*)
 
 RANGES = {"Last 1 hour": 1, "Last 6 hours": 6, "Last 24 hours": 24, "Last 7 days": 168}
 c1, c2, _ = st.columns([2, 1, 5])
-range_label = c1.selectbox("Time range", list(RANGES), index=2)
+range_label = c1.selectbox("Time range", list(RANGES), index=3)  # 7 days: demo traffic stays visible
 HOURS = RANGES[range_label]
 BIN = {1: 5, 6: 15, 24: 60, 168: 360}[HOURS]
 if c2.button("Refresh", width="stretch"):
@@ -149,8 +149,11 @@ with tabs[0]:
                     m[1].metric("Tokens", f"{int(d['input_tokens'].sum() + d['output_tokens'].sum()):,}")
                     m[2].metric("Est. cost", f"${d['cost_usd'].sum():.3f}", help="Haiku 4.5 list price, model tokens only")
                     m[3].metric("Guardrail blocks", int((d["guardrail_action"] == "INTERVENED").sum()))
-                    last = d["ts"].max()
-                    st.caption(f"Last call {last:%d %b %H:%M} UTC · {d['user'].nunique()} distinct users")
+                    if d.empty:
+                        st.caption("No calls in this time range")
+                    else:
+                        last = d["ts"].max()
+                        st.caption(f"Last call {last:%d %b %H:%M} UTC · {d['user'].nunique()} distinct users")
 
             st.markdown("##### Calls over time")
             st.caption(f"Agent calls per {BIN} minutes")

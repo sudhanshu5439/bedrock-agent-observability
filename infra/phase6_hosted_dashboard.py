@@ -5,6 +5,9 @@
     python phase6_hosted_dashboard.py url                                  # current link (changes on restart)
     python phase6_hosted_dashboard.py stop | start                         # pause / resume (stop = no compute cost)
     python phase6_hosted_dashboard.py password                             # print the dashboard password
+    python phase6_hosted_dashboard.py destroy                              # remove the hosting (this region)
+Add --region <name> before the command to host somewhere else (default ap-south-1, Mumbai: close to the
+viewers; the agents and their records stay in us-east-1 and are read from there).
 
 No image build: the task runs the public Python image, downloads this repository at --ref from GitHub,
 and starts app/serve.py. It uses a read-only task role (plus invoke rights for the Live test tab), never
@@ -12,7 +15,9 @@ personal credentials. Plain HTTP on port 8501: access is limited by the security
 Removed by teardown.py.
 """
 import argparse
+import hashlib
 import json
+import os
 import secrets
 import sys
 import time
@@ -52,7 +57,40 @@ COMMAND = (
 )
 
 s = session()
-ec2, ecs, logs, sm = (s.client(n) for n in ("ec2", "ecs", "logs", "secretsmanager"))
+HOST_REGION = os.environ.get("BEDROCK_DEMO_HOST_REGION", "ap-south-1")
+ec2 = ecs = logs = sm = None
+
+
+def use_region(region):
+    """Clients for the hosting region; data stays in REGION (config)."""
+    global HOST_REGION, ec2, ecs, logs, sm
+    HOST_REGION = region
+    ec2, ecs, logs, sm = (s.client(n, region_name=region) for n in ("ec2", "ecs", "logs", "secretsmanager"))
+
+
+use_region(HOST_REGION)
+
+
+def sync_policy(role_name, doc):
+    """Make sure a customer-managed policy with exactly doc is attached to the role.
+
+    ensure_role creates "<role>-policy" once and never updates it, and this account may not create policy
+    versions, so a changed document goes into a new policy named after its content hash and is attached
+    alongside. teardown.py deletes every customer-managed policy attached to the demo roles.
+    """
+    iam = s.client("iam")
+    base = f"arn:aws:iam::{ACCOUNT_ID}:policy/{role_name}-policy"
+    pol = iam.get_policy(PolicyArn=base)["Policy"]
+    if iam.get_policy_version(PolicyArn=base, VersionId=pol["DefaultVersionId"])["PolicyVersion"]["Document"] == doc:
+        return
+    digest = hashlib.sha256(json.dumps(doc, sort_keys=True).encode()).hexdigest()[:8]
+    name = f"{role_name}-policy-{digest}"
+    try:
+        iam.create_policy(PolicyName=name, PolicyDocument=json.dumps(doc))
+        print(f"policy {name} created")
+    except iam.exceptions.EntityAlreadyExistsException:
+        pass
+    iam.attach_role_policy(RoleName=role_name, PolicyArn=f"arn:aws:iam::{ACCOUNT_ID}:policy/{name}")
 
 
 def outputs():
@@ -91,11 +129,14 @@ def ensure_roles(secret_arn, out):
     trust = {"Version": "2012-10-17", "Statement": [{
         "Effect": "Allow", "Principal": {"Service": "ecs-tasks.amazonaws.com"}, "Action": "sts:AssumeRole",
         "Condition": {"StringEquals": {"aws:SourceAccount": ACCOUNT_ID}}}]}
-    exec_arn = ensure_role(EXEC_ROLE, trust, {"Version": "2012-10-17", "Statement": [
+    exec_doc = {"Version": "2012-10-17", "Statement": [  # any hosting region, same names
         {"Effect": "Allow", "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
-         "Resource": f"arn:aws:logs:{REGION}:{ACCOUNT_ID}:log-group:{LOG_GROUP}:*"},
-        {"Effect": "Allow", "Action": "secretsmanager:GetSecretValue", "Resource": secret_arn},
-    ]}, "ECS execution role for the hosted dashboard: logs and its password secret")
+         "Resource": f"arn:aws:logs:*:{ACCOUNT_ID}:log-group:{LOG_GROUP}:*"},
+        {"Effect": "Allow", "Action": "secretsmanager:GetSecretValue",
+         "Resource": f"arn:aws:secretsmanager:*:{ACCOUNT_ID}:secret:{SECRET}-*"},
+    ]}
+    exec_arn = ensure_role(EXEC_ROLE, trust, exec_doc, "ECS execution role for the hosted dashboard: logs and its password secret")
+    sync_policy(EXEC_ROLE, exec_doc)
 
     a = f"arn:aws:bedrock:{REGION}:{ACCOUNT_ID}"
     ac = f"arn:aws:bedrock-agentcore:{REGION}:{ACCOUNT_ID}"
@@ -181,7 +222,7 @@ def register_task(exec_arn, task_arn, secret_arn, out, ref):
             "environment": [{"name": k, "value": v} for k, v in env.items()],
             "secrets": [{"name": "DASHBOARD_PASSWORD", "valueFrom": secret_arn}],
             "logConfiguration": {"logDriver": "awslogs", "options": {
-                "awslogs-group": LOG_GROUP, "awslogs-region": REGION, "awslogs-stream-prefix": "dashboard"}},
+                "awslogs-group": LOG_GROUP, "awslogs-region": HOST_REGION, "awslogs-stream-prefix": "dashboard"}},
             "healthCheck": {"command": ["CMD-SHELL", "python -c \"import urllib.request;"
                                         f"urllib.request.urlopen('http://127.0.0.1:{PORT}/_stcore/health',timeout=5)\""],
                             "interval": 30, "timeout": 10, "retries": 3, "startPeriod": 300},
@@ -272,6 +313,12 @@ def deploy(args):
     ensure_cluster()
     task_def = register_task(exec_arn, task_arn, secret_arn, out, args.ref)
     ensure_service(task_def, subnets, gid)
+    step("Waiting for the rollout (the old task stops, the new one starts)")
+    for _ in range(60):
+        svc = ecs.describe_services(cluster=CLUSTER, services=[SERVICE])["services"][0]
+        if len(svc["deployments"]) == 1 and svc["deployments"][0].get("rolloutState") == "COMPLETED":
+            break
+        time.sleep(10)
     step("Waiting for the task to start")
     url = current_url(wait_s=600)
     if not url:
@@ -283,15 +330,18 @@ def deploy(args):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--region", default=HOST_REGION, help=f"hosting region (data stays in {REGION})")
     sub = ap.add_subparsers(dest="cmd", required=True)
     d = sub.add_parser("deploy")
     d.add_argument("--allow", action="append", required=True, help="viewer IP or CIDR; repeat for more")
     d.add_argument("--ref", default="main", help="git commit or branch of the GitHub repo to run")
     a = sub.add_parser("allow")
     a.add_argument("ips", nargs="+")
-    for name in ("url", "stop", "start", "password"):
+    for name in ("url", "stop", "start", "password", "destroy"):
         sub.add_parser(name)
     args = ap.parse_args()
+    use_region(args.region)
+    print(f"hosting region: {HOST_REGION}")
 
     if args.cmd == "deploy":
         deploy(args)
@@ -305,6 +355,10 @@ def main():
         print(f"{args.cmd} requested" + ("; run `url` in ~3 minutes for the new address" if args.cmd == "start" else ""))
     elif args.cmd == "password":
         print(sm.get_secret_value(SecretId=SECRET)["SecretString"])
+    elif args.cmd == "destroy":
+        import teardown
+        teardown.EXECUTE = True
+        teardown.hosted_dashboard(HOST_REGION)
 
 
 if __name__ == "__main__":

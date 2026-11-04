@@ -17,7 +17,7 @@ from botocore.exceptions import ClientError
 
 from config import (
     ACCOUNT_ID, BUDGET_NAME, CLOUDTRAIL_CWLOGS_ROLE, INVOCATION_LOG_GROUP, INVOCATION_LOGGING_ROLE, LOG_BUCKET,
-    PREFIX, TRACE_TABLE, TRAIL_NAME, session,
+    PREFIX, REGION, TRACE_TABLE, TRAIL_NAME, session,
 )
 
 OUTPUTS = Path(__file__).with_name("outputs.json")
@@ -61,17 +61,22 @@ def wait_gone(check, what, attempts=30, delay=5):
     print(f"  (still deleting {what}, continuing)")
 
 
-def hosted_dashboard():
-    print("\nHosted dashboard (phase 6)")
-    ecs, ec2 = s.client("ecs"), s.client("ec2")
+HOSTING_REGIONS = ["ap-south-1", "us-east-1"]  # phase 6 hosts in ap-south-1 by default; earlier runs used us-east-1
+
+
+def hosted_dashboard(region):
+    print(f"\nHosted dashboard (phase 6, {region})")
+    ecs, ec2 = s.client("ecs", region_name=region), s.client("ec2", region_name=region)
+    logs, sm = s.client("logs", region_name=region), s.client("secretsmanager", region_name=region)
     cluster, service = f"{PREFIX}-cluster", f"{PREFIX}-dashboard"
+    active = any(c["status"] == "ACTIVE" for c in ecs.describe_clusters(clusters=[cluster])["clusters"])
     svc = [x for x in ecs.describe_services(cluster=cluster, services=[service]).get("services", [])
-           if x["status"] == "ACTIVE"] if ecs.describe_clusters(clusters=[cluster])["clusters"] else []
+           if x["status"] == "ACTIVE"] if active else []
     if svc:
         act(f"ECS service {service}", lambda: ecs.delete_service(cluster=cluster, service=service, force=True))
     for arn in ecs.list_task_definitions(familyPrefix=f"{PREFIX}-dashboard")["taskDefinitionArns"]:
         act(f"task definition {arn.split('/')[-1]}", lambda a=arn: ecs.deregister_task_definition(taskDefinition=a))
-    if ecs.describe_clusters(clusters=[cluster])["clusters"]:
+    if active:
         def delete_cluster():
             for _ in range(30):  # the cluster can only go once its tasks have stopped
                 try:
@@ -91,8 +96,17 @@ def hosted_dashboard():
                         raise
                     time.sleep(10)
         act(f"security group {sg['GroupId']}", delete_sg)
-    act(f"secret {PREFIX}/dashboard-password", lambda: s.client("secretsmanager").delete_secret(
-        SecretId=f"{PREFIX}/dashboard-password", ForceDeleteWithoutRecovery=True))
+    try:
+        sm.describe_secret(SecretId=f"{PREFIX}/dashboard-password")
+        act(f"secret {PREFIX}/dashboard-password", lambda: sm.delete_secret(
+            SecretId=f"{PREFIX}/dashboard-password", ForceDeleteWithoutRecovery=True))
+    except ClientError:
+        pass
+    if region != REGION:  # log groups in the data region are removed with the others below
+        for page in logs.get_paginator("describe_log_groups").paginate(logGroupNamePrefix=f"/{PREFIX}/"):
+            for lg in page["logGroups"]:
+                act(f"log group {lg['logGroupName']} ({region})",
+                    lambda n=lg["logGroupName"]: logs.delete_log_group(logGroupName=n))
 
 
 def agentcore(out):
@@ -177,9 +191,14 @@ def iam():
     client = s.client("iam")
     for role in ROLES:
         def delete_role(r=role):
+            extra = []
             for p in client.list_attached_role_policies(RoleName=r)["AttachedPolicies"]:
                 client.detach_role_policy(RoleName=r, PolicyArn=p["PolicyArn"])
+                if p["PolicyName"].startswith(f"{r}-policy-"):  # extra versions added by phase 6
+                    extra.append(p["PolicyArn"])
             client.delete_role(RoleName=r)
+            for arn in extra:
+                client.delete_policy(PolicyArn=arn)
         act(f"role {role}", delete_role)
         policy_arn = f"arn:aws:iam::{ACCOUNT_ID}:policy/{role}-policy"
 
@@ -199,7 +218,8 @@ def main():
     EXECUTE = ap.parse_args().yes
     out = json.loads(OUTPUTS.read_text()) if OUTPUTS.exists() else {}
     print("DELETING demo resources" if EXECUTE else "DRY RUN - nothing will be deleted (pass --yes to delete)")
-    hosted_dashboard()
+    for region in HOSTING_REGIONS:
+        hosted_dashboard(region)
     agentcore(out)
     classic(out)
     lambdas()

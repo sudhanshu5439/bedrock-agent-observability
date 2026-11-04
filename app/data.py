@@ -444,8 +444,8 @@ def keep_warm(hours, bin_minutes):
     _warmer()[(hours, bin_minutes)] = time.time()
 
 
-# Warm the default view (last 24 hours) as soon as the server starts, so the first visitor doesn't wait.
+# Warm the default view (last 7 days) as soon as the server starts, so the first visitor doesn't wait.
 if os.environ.get("DASHBOARD_WARM_ON_START", "1") == "1":
     _POOL.submit(_safe, caller_account, ())
-    prefetch(24, 60)
-    keep_warm(24, 60)
+    prefetch(168, 360)
+    keep_warm(168, 360)
