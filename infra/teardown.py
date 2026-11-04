@@ -22,7 +22,8 @@ from config import (
 
 OUTPUTS = Path(__file__).with_name("outputs.json")
 ROLES = [INVOCATION_LOGGING_ROLE, CLOUDTRAIL_CWLOGS_ROLE, f"{PREFIX}-tools-lambda-role", f"{PREFIX}-hr-agent-role",
-         f"{PREFIX}-it-gateway-role", f"{PREFIX}-harness-role"]
+         f"{PREFIX}-it-gateway-role", f"{PREFIX}-harness-role", f"{PREFIX}-dashboard-exec-role",
+         f"{PREFIX}-dashboard-task-role"]
 LAMBDAS = [f"{PREFIX}-hr-tools", f"{PREFIX}-it-tools"]
 LOG_GROUP_PREFIXES = [f"/{PREFIX}/", f"/aws/lambda/{PREFIX}-", "/aws/bedrock-agentcore/runtimes/harness_bedrock_demo_",
                       "/aws/bedrock-agentcore/runtimes/bedrock_demo_"]
@@ -58,6 +59,40 @@ def wait_gone(check, what, attempts=30, delay=5):
             return
         time.sleep(delay)
     print(f"  (still deleting {what}, continuing)")
+
+
+def hosted_dashboard():
+    print("\nHosted dashboard (phase 6)")
+    ecs, ec2 = s.client("ecs"), s.client("ec2")
+    cluster, service = f"{PREFIX}-cluster", f"{PREFIX}-dashboard"
+    svc = [x for x in ecs.describe_services(cluster=cluster, services=[service]).get("services", [])
+           if x["status"] == "ACTIVE"] if ecs.describe_clusters(clusters=[cluster])["clusters"] else []
+    if svc:
+        act(f"ECS service {service}", lambda: ecs.delete_service(cluster=cluster, service=service, force=True))
+    for arn in ecs.list_task_definitions(familyPrefix=f"{PREFIX}-dashboard")["taskDefinitionArns"]:
+        act(f"task definition {arn.split('/')[-1]}", lambda a=arn: ecs.deregister_task_definition(taskDefinition=a))
+    if ecs.describe_clusters(clusters=[cluster])["clusters"]:
+        def delete_cluster():
+            for _ in range(30):  # the cluster can only go once its tasks have stopped
+                try:
+                    return ecs.delete_cluster(cluster=cluster)
+                except ClientError as e:
+                    if e.response["Error"]["Code"] not in ("ClusterContainsTasksException", "ClusterContainsServicesException"):
+                        raise
+                    time.sleep(10)
+        act(f"ECS cluster {cluster}", delete_cluster)
+    for sg in ec2.describe_security_groups(Filters=[{"Name": "group-name", "Values": [f"{PREFIX}-dashboard-sg"]}])["SecurityGroups"]:
+        def delete_sg(gid=sg["GroupId"]):
+            for _ in range(30):  # the task's network interface is released a little after it stops
+                try:
+                    return ec2.delete_security_group(GroupId=gid)
+                except ClientError as e:
+                    if e.response["Error"]["Code"] != "DependencyViolation":
+                        raise
+                    time.sleep(10)
+        act(f"security group {sg['GroupId']}", delete_sg)
+    act(f"secret {PREFIX}/dashboard-password", lambda: s.client("secretsmanager").delete_secret(
+        SecretId=f"{PREFIX}/dashboard-password", ForceDeleteWithoutRecovery=True))
 
 
 def agentcore(out):
@@ -164,6 +199,7 @@ def main():
     EXECUTE = ap.parse_args().yes
     out = json.loads(OUTPUTS.read_text()) if OUTPUTS.exists() else {}
     print("DELETING demo resources" if EXECUTE else "DRY RUN - nothing will be deleted (pass --yes to delete)")
+    hosted_dashboard()
     agentcore(out)
     classic(out)
     lambdas()

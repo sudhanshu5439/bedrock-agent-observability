@@ -7,7 +7,7 @@ root = fso.GetParentFolderName(WScript.ScriptFullName)
 sh.CurrentDirectory = root
 
 If Not AlreadyRunning() Then
-    sh.Run "cmd /c """"" & root & "\.venv\Scripts\streamlit.exe"" run app\dashboard.py > app\streamlit.log 2>&1""", 0, False
+    sh.Run "cmd /c """"" & root & "\.venv\Scripts\python.exe"" app\serve.py > app\streamlit.log 2>&1""", 0, False
 End If
 
 Function AlreadyRunning()

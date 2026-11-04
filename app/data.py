@@ -10,14 +10,16 @@ Sources
 
 Only the demo's own agents are shown; the account is shared, so every query is filtered to them.
 """
+import copy
 import functools
 import json
 import os
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, UTC
 
 import pandas as pd
-import streamlit as st
 from boto3.dynamodb.conditions import Key
 
 from invoke import AGENTS, OUTPUTS, _s as SESSION  # isort: skip  (puts infra/ on sys.path for config)
@@ -49,6 +51,42 @@ ac_ctl = SESSION.client("bedrock-agentcore-control")
 lam = SESSION.client("lambda")
 
 
+
+def ttl_cache(seconds):
+    """Process-wide cache shared by every browser session and by the background warmer.
+
+    Unlike st.cache_data it works from plain threads. One lock per key, so a value is fetched once even
+    when several threads ask at the same time. Callers get a copy, so they can't alter the cached value.
+    """
+    def deco(fn):
+        store, locks, guard = {}, {}, threading.Lock()
+
+        @functools.wraps(fn)
+        def wrapper(*args):
+            with guard:
+                lock = locks.setdefault(args, threading.Lock())
+            with lock:
+                hit = store.get(args)
+                if hit is None or time.time() - hit[0] > seconds:
+                    hit = (time.time(), fn(*args))
+                    store[args] = hit
+            value = hit[1]
+            return value.copy() if isinstance(value, pd.DataFrame) else copy.deepcopy(value)
+
+        wrapper.clear = store.clear
+        _CACHES.append(store)
+        return wrapper
+    return deco
+
+
+_CACHES = []
+
+
+def clear_all():
+    for store in _CACHES:
+        store.clear()
+
+
 def public(fn):
     """Apply redaction to a data function's result when DASHBOARD_REDACT=1."""
     @functools.wraps(fn)
@@ -60,6 +98,11 @@ def public(fn):
 
 def redact_text(text):
     return scrub(text, account_id(), REDACT_NAMES) if REDACT else text
+
+
+@ttl_cache(300)
+def caller_account():
+    return SESSION.client("sts").get_caller_identity()["Account"]
 
 
 def since(hours):
@@ -80,7 +123,7 @@ def insights(log_group, query, hours, limit=10000):
 
 
 # ------------------------------------------------------------------ DynamoDB trace table
-@st.cache_data(ttl=60, show_spinner=False)
+@ttl_cache(300)
 @public
 def trace_items(hours):
     """All items for both agents in the window, via the agent_id GSI."""
@@ -110,7 +153,7 @@ SPAN_COLUMNS = ["status.code", "attributes.aws.genai.span_kind", "attributes.gen
                 "attributes.gen_ai.tool.call.arguments", "attributes.gen_ai.tool.call.result"]
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@ttl_cache(300)
 @public
 def spans_for_session(session_id, hours=168):
     q = (f"filter attributes.session.id = '{session_id}' "
@@ -131,7 +174,7 @@ def spans_for_session(session_id, hours=168):
     return df
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+@ttl_cache(300)
 @public
 def span_tool_stats(hours):
     q = (f"filter attributes.harness.id = '{OUTPUTS['it_harness']['harness_id']}' and name like /^mcp tools.call/ "
@@ -147,7 +190,7 @@ def span_tool_stats(hours):
                          "avg_ms": (g["ns"].sum() / g["n"].sum() / 1e6).round(0)}).fillna(0).reset_index()
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+@ttl_cache(300)
 @public
 def span_errors(hours):
     q = (f"filter attributes.harness.id = '{OUTPUTS['it_harness']['harness_id']}' and status.code = 'ERROR' and name like /^mcp tools.call/ "
@@ -161,7 +204,7 @@ def span_errors(hours):
     return df
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@ttl_cache(900)
 @public
 def harness_declared_tools(hours=168):
     q = (f"filter attributes.harness.id = '{OUTPUTS['it_harness']['harness_id']}' and name like /^invoke_agent/ "
@@ -171,7 +214,7 @@ def harness_declared_tools(hours=168):
 
 
 # ------------------------------------------------------------------ model invocation log
-@st.cache_data(ttl=120, show_spinner=False)
+@ttl_cache(300)
 @public
 def model_calls(hours, bin_minutes):
     q = ("filter identity.arn like /bedrock-demo-/ "
@@ -193,7 +236,7 @@ AUDIT_COLUMNS = ["eventTime", "eventName", "eventSource", "caller", "caller_type
                  "userAgent", "session_id", "resource", "errorCode", "errorMessage"]
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+@ttl_cache(300)
 @public
 def audit_events(hours):
     q = (f"filter @message like {OUR_RESOURCES} "
@@ -232,7 +275,7 @@ def _lookup(attr, value, start, pages=4):
         time.sleep(0.5)  # lookup_events allows 2 requests per second
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@ttl_cache(900)
 @public
 def config_changes(days=30):
     """Who created or changed the demo resources: write management events from CloudTrail event history."""
@@ -264,7 +307,7 @@ def config_changes(days=30):
 
 
 # ------------------------------------------------------------------ Lambda
-@st.cache_data(ttl=120, show_spinner=False)
+@ttl_cache(300)
 @public
 def lambda_metrics(hours):
     end = datetime.now(UTC)
@@ -285,7 +328,7 @@ def lambda_metrics(hours):
     return out
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+@ttl_cache(300)
 @public
 def lambda_error_logs(hours):
     rows = []
@@ -308,7 +351,7 @@ def lambda_error_logs(hours):
 
 
 # ------------------------------------------------------------------ configuration
-@st.cache_data(ttl=300, show_spinner=False)
+@ttl_cache(600)
 @public
 def classic_config():
     a = OUTPUTS["hr_agent"]
@@ -325,7 +368,7 @@ def classic_config():
             "lambda": lam.get_function_configuration(FunctionName=LAMBDAS[HR["name"]])}
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@ttl_cache(600)
 @public
 def agentcore_config():
     h = ac_ctl.get_harness(harnessId=OUTPUTS["it_harness"]["harness_id"])["harness"]
@@ -337,3 +380,72 @@ def agentcore_config():
 
 
 MODEL_LABEL = MODEL_ID
+
+
+# ------------------------------------------------------------------ speed: parallel prefetch + keep-warm
+WARM_EVERY_S = 240     # refresh before the 300 s caches expire
+WARM_WHILE_S = 1800    # keep refreshing only while someone opened the dashboard in the last 30 minutes
+
+
+def _jobs(hours, bin_minutes):
+    return [(trace_items, (hours,)), (classic_config, ()), (agentcore_config, ()), (harness_declared_tools, ()),
+            (config_changes, ()), (model_calls, (hours, bin_minutes)), (span_tool_stats, (hours,)),
+            (lambda_metrics, (hours,)), (audit_events, (hours,)), (span_errors, (hours,)), (lambda_error_logs, (hours,))]
+
+
+def _safe(fn, args):
+    try:
+        fn(*args)
+    except Exception:  # noqa: S110  (the tab that needs it calls again and shows the error)
+        pass
+
+
+_POOL = ThreadPoolExecutor(max_workers=12, thread_name_prefix="prefetch")
+
+
+def prefetch(hours, bin_minutes, wait=False):
+    """Fetch every source in parallel: a cold load costs the slowest call, not the sum (≈34 s sequential).
+
+    Without wait, it returns at once; each tab then blocks only on its own data (per-key lock in ttl_cache),
+    so the first tab renders while the others are still loading.
+    """
+    futures = [_POOL.submit(_safe, fn, args) for fn, args in _jobs(hours, bin_minutes)]
+    if wait:
+        for f in futures:
+            f.result()
+
+
+_WARM_SEEN = {}
+_WARM_STARTED = threading.Event()
+_WARM_LOCK = threading.Lock()
+
+
+def _warmer():
+    """One background thread per server: re-fills the caches for recently viewed time ranges."""
+    seen = _WARM_SEEN
+    with _WARM_LOCK:
+        if _WARM_STARTED.is_set():
+            return seen
+        _WARM_STARTED.set()
+
+    def loop():
+        while True:
+            time.sleep(WARM_EVERY_S)
+            now = time.time()
+            for (hours, bin_minutes), last in list(seen.items()):
+                if now - last < WARM_WHILE_S:
+                    prefetch(hours, bin_minutes, wait=True)
+
+    threading.Thread(target=loop, name="cache-warmer", daemon=True).start()
+    return seen
+
+
+def keep_warm(hours, bin_minutes):
+    _warmer()[(hours, bin_minutes)] = time.time()
+
+
+# Warm the default view (last 24 hours) as soon as the server starts, so the first visitor doesn't wait.
+if os.environ.get("DASHBOARD_WARM_ON_START", "1") == "1":
+    _POOL.submit(_safe, caller_account, ())
+    prefetch(24, 60)
+    keep_warm(24, 60)

@@ -1,7 +1,7 @@
 """Shared settings for the Bedrock observability demo.
 
 Nothing account-specific is stored here. Override with environment variables:
-  BEDROCK_DEMO_PROFILE       AWS CLI profile (default: genai-demo)
+  BEDROCK_DEMO_PROFILE       AWS CLI profile (default: genai-demo; empty = ambient credentials, e.g. a task role)
   BEDROCK_DEMO_REGION        region (default: us-east-1)
   BEDROCK_DEMO_BUDGET_EMAIL  where budget alerts go (needed only by phase1_foundation.py)
 The account id is read from the active credentials.
@@ -33,7 +33,8 @@ MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
 @functools.cache
 def session():
-    return boto3.Session(profile_name=PROFILE, region_name=REGION)
+    # An empty profile means "use the ambient credentials" (e.g. the ECS task role when hosted).
+    return boto3.Session(profile_name=PROFILE or None, region_name=REGION)
 
 
 @functools.cache
